@@ -38,6 +38,7 @@ struct DialogState;
 struct DisplayState;
 struct GxmState;
 struct Config;
+struct KernelState;
 
 namespace overlay {
 class display_manager;
@@ -90,6 +91,7 @@ struct State {
     fs::path shaders_log_path;
 
     FrameHost *frame = nullptr;
+    KernelState *kernel = nullptr;
 
     Backend current_backend;
     FeatureState features;
@@ -116,7 +118,18 @@ struct State {
 
     // on Vulkan, this is actually the number of pipelines compiled
     uint32_t shaders_count_compiled = 0;
+    uint32_t pipelines_redundant_avoided = 0;
     uint32_t programs_count_pre_compiled = 0;
+
+    std::atomic<uint64_t> progress_counter{ 0 };
+    std::atomic<int64_t> last_mem_transition_epoch_ms{ 0 };
+    std::atomic<int> last_cmd_opcode{ -1 };
+    std::atomic<int64_t> last_cmd_epoch_ms{ 0 };
+    std::atomic<int64_t> last_abandon_epoch_ms{ 0 };
+    std::atomic<bool> in_dormant_wait{ false };
+    std::atomic<int> wait_last_kind{ -1 };
+    std::atomic<int64_t> wait_last_epoch_ms{ 0 };
+    std::atomic<uint32_t> wait_fences_pending{ 0 };
 
     bool should_display;
 
@@ -136,6 +149,9 @@ struct State {
     // only support disabled by default
     int supported_mapping_methods_mask = 1;
     MappingMethod mapping_method = MappingMethod::Disabled;
+
+    // Android memory pressure (onTrimMemory)
+    std::atomic<int> memory_trim_level{ -1 };
 
     // used for driver bug workaround
     bool is_adreno_stock = false;
@@ -217,6 +233,9 @@ struct State {
 
     virtual void precompile_shader(const ShadersHash &hash) = 0;
     virtual void preclose_action() = 0;
+    virtual void wait_gpu_idle() {}
+
+    virtual uint32_t diag_pipelines_created() const { return ~0u; }
 
     virtual ~State() = default;
 
