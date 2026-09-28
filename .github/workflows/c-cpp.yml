@@ -1,7 +1,11 @@
 name: Build CI
 
 on:
+  # Pushes build (and publish) only the release branch; other branches build through their pull
+  # request, so a branch with an open PR isn't built twice per commit. The "Update from upstream"
+  # workflow's backup/* branches don't trigger builds either. "Run workflow" builds any branch.
   push:
+    branches: [feature/game-bundle]
     paths-ignore:
       - '**.md'
   pull_request:
@@ -13,6 +17,12 @@ env:
   BUILD_CONFIG: Release
   QT_VERSION: '6.11.0'
   SCCACHE_GHA_ENABLED: "true"
+
+# A new push to a pull request cancels that PR's older build. Release-branch builds are never
+# cancelled mid-run, so a publish can't be cut short; a newer one waits its turn instead.
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   desktop-build:
@@ -55,17 +65,9 @@ jobs:
             cache_path: C:\msys2-ccache
             qt_install_deps: 'false'
 
-          - platform: macos-x64
-            runs_on: macos-latest
-            cmake_preset: ci-macos-x64
-            cache_path: ~/Library/Caches/ccache
-            qt_install_deps: 'false'
-
-          - platform: macos-arm64
-            runs_on: macos-latest
-            cmake_preset: ci-macos-arm64
-            cache_path: ~/Library/Caches/ccache
-            qt_install_deps: 'false'
+          # No macOS legs: this fork doesn't ship a macOS build, and macOS runners cost the most.
+          # The macOS-only steps below are left in place (they never run) to keep upstream rebases
+          # conflict-free.
 
     steps:
       - uses: actions/checkout@v7
@@ -358,8 +360,8 @@ jobs:
   # "Update from upstream" workflow starts via `gh workflow run` with the built-in GITHUB_TOKEN, so
   # auto-update builds never actually published (the release sat stale even after a clean build).
   # Publishing from inside the build run avoids that entirely: no cross-workflow event, no token
-  # suppression. Runs even when some matrix legs fail (the macOS runners fail on pre-existing infra)
-  # and publishes whatever artifacts exist. Never runs on pull requests.
+  # suppression. Runs even when some build legs fail and publishes whatever artifacts exist. Never
+  # runs on pull requests.
   publish-noinstall-release:
     name: Publish NoInstall Release
     needs: [desktop-build, android-build]
